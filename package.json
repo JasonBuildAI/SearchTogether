@@ -1,0 +1,15 @@
+{
+  "name": "juheliulan",
+  "version": "1.0.0",
+  "description": "小黄聚合搜索 - 前后端完整项目",
+  "scripts": {
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "start:backend": "cd backend && npm start",
+    "build:frontend": "cd frontend && npm run build"
+  },
+  "keywords": ["search", "aggregator", "vue", "express"],
+  "author": "xiaohuang",
+  "license": "MIT"
+}
