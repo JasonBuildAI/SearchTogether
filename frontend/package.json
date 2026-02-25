@@ -1,7 +1,8 @@
 {
   "name": "juheliulan-frontend",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
+  "description": "小黄聚合搜索前端应用",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

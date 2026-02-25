@@ -1,194 +1,198 @@
 <template>
   <div class="container">
     <header class="header">
-      <h1>📁 小黄文件处理助手</h1>
-      <p>轻松上传、管理和下载您的文件</p>
+      <h1>🔍 小黄聚合搜索</h1>
+      <p>发现优质内容，汇聚智慧资源</p>
     </header>
 
-    <div class="upload-section">
-      <div 
-        class="upload-area"
-        :class="{ 'drag-over': isDragOver }"
-        @dragover.prevent="isDragOver = true"
-        @dragleave.prevent="isDragOver = false"
-        @drop.prevent="handleDrop"
-        @click="triggerFileInput"
-      >
-        <input
-          ref="fileInput"
-          type="file"
-          @change="handleFileSelect"
-          style="display: none"
-        />
-        <div class="upload-icon">📤</div>
-        <p class="upload-text">
-          {{ uploading ? '正在上传...' : '点击或拖拽文件到此处上传' }}
-        </p>
-        <p class="upload-hint">支持任意格式的文件</p>
+    <div class="search-box">
+      <input
+        v-model="query"
+        type="text"
+        class="search-input"
+        placeholder="搜索 GitHub、文章、视频、商品..."
+        @keyup.enter="handleSearch"
+      />
+      <button class="search-button" @click="handleSearch" :disabled="loading">
+        {{ loading ? '搜索中...' : '搜索' }}
+      </button>
+    </div>
+
+    <div class="hot-keywords">
+      <h3>🔥 热门搜索</h3>
+      <div class="hot-tags">
+        <span
+          v-for="keyword in hotKeywords"
+          :key="keyword"
+          class="hot-tag"
+          @click="searchKeyword(keyword)"
+        >
+          {{ keyword }}
+        </span>
       </div>
     </div>
 
-    <div class="files-section">
-      <div class="section-header">
-        <h2>📋 文件列表</h2>
-        <span class="file-count">共 {{ files.length }} 个文件</span>
-      </div>
+    <div v-if="results.length > 0" class="filter-tabs">
+      <button
+        v-for="tab in filterTabs"
+        :key="tab.value"
+        class="filter-tab"
+        :class="{ active: activeFilter === tab.value }"
+        @click="activeFilter = tab.value"
+      >
+        {{ tab.label }}
+      </button>
+    </div>
 
+    <div class="results-container">
       <div v-if="loading" class="loading">
-        加载中...
+        正在搜索中，请稍候...
       </div>
 
-      <div v-else-if="files.length > 0" class="files-grid">
-        <div v-for="file in files" :key="file.id" class="file-card">
-          <div class="file-icon">
-            {{ getFileIcon(file.name) }}
-          </div>
-          <div class="file-info">
-            <h3 class="file-name" :title="file.name">{{ file.name }}</h3>
-            <p class="file-meta">
-              <span>📦 {{ file.sizeFormatted }}</span>
-              <span>🕐 {{ file.uploadDateFormatted }}</span>
-            </p>
-          </div>
-          <div class="file-actions">
-            <button @click="downloadFile(file)" class="action-btn download-btn">
-              📥 下载
-            </button>
-            <button @click="deleteFile(file)" class="action-btn delete-btn" :disabled="deleting">
-              🗑️ 删除
-            </button>
+      <div v-else-if="noResults" class="no-results">
+        <h3>未找到相关结果</h3>
+        <p>试试其他关键词吧</p>
+      </div>
+
+      <div v-else-if="filteredResults.length > 0">
+        <div class="results-info">
+          共找到 {{ filteredResults.length }} 条结果
+        </div>
+        <div class="results-list">
+          <div v-for="result in filteredResults" :key="result.id" class="result-card">
+            <a :href="result.url" target="_blank" rel="noopener noreferrer">
+              <h3 class="result-title">{{ result.title }}</h3>
+              <p class="result-snippet">{{ result.snippet }}</p>
+              <div class="result-meta">
+                <span class="meta-item">{{ getSourceIcon(result.source) }} {{ result.source }}</span>
+                <span class="meta-badge">{{ getTypeLabel(result.type) }}</span>
+                <template v-if="result.type === 'github'">
+                  <span class="meta-item">⭐ {{ formatNumber(result.stars) }}</span>
+                  <span class="meta-item">🍴 {{ formatNumber(result.forks) }}</span>
+                  <span class="meta-badge">{{ result.language }}</span>
+                </template>
+                <template v-else-if="result.type === 'article'">
+                  <span class="meta-item">👁️ {{ formatNumber(result.views) }}</span>
+                  <span class="meta-item">❤️ {{ formatNumber(result.likes) }}</span>
+                </template>
+                <template v-else-if="result.type === 'video'">
+                  <span class="meta-item">⏱️ {{ result.duration }}</span>
+                  <span class="meta-item">👁️ {{ result.views }}</span>
+                </template>
+                <template v-else-if="result.type === 'product'">
+                  <span class="meta-item">💰 {{ result.price }}</span>
+                  <span class="meta-item">🛒 {{ result.sales }}</span>
+                </template>
+              </div>
+            </a>
           </div>
         </div>
-      </div>
-
-      <div v-else class="no-files">
-        <div class="no-files-icon">📭</div>
-        <h3>暂无文件</h3>
-        <p>上传一些文件开始使用吧</p>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 
-const fileInput = ref(null)
-const files = ref([])
+const query = ref('')
+const results = ref([])
 const loading = ref(false)
-const uploading = ref(false)
-const deleting = ref(false)
-const isDragOver = ref(false)
+const activeFilter = ref('all')
+const hotKeywords = ref([])
 
-const getFileIcon = (filename) => {
-  const ext = filename.split('.').pop().toLowerCase()
+const filterTabs = [
+  { label: '全部', value: 'all' },
+  { label: 'GitHub', value: 'github' },
+  { label: '文章', value: 'article' },
+  { label: '视频', value: 'video' },
+  { label: '商品', value: 'product' }
+]
+
+const noResults = computed(() => {
+  return !loading.value && results.value.length === 0 && query.value !== ''
+})
+
+const filteredResults = computed(() => {
+  if (activeFilter.value === 'all') {
+    return results.value
+  }
+  return results.value.filter(result => result.type === activeFilter.value)
+})
+
+const getSourceIcon = (source) => {
   const icons = {
-    pdf: '📄',
-    doc: '📝',
-    docx: '📝',
-    xls: '📊',
-    xlsx: '📊',
-    ppt: '📽️',
-    pptx: '📽️',
-    jpg: '🖼️',
-    jpeg: '🖼️',
-    png: '🖼️',
-    gif: '🖼️',
-    svg: '🖼️',
-    mp3: '🎵',
-    wav: '🎵',
-    mp4: '🎬',
-    avi: '🎬',
-    zip: '📦',
-    rar: '📦',
-    '7z': '📦',
-    txt: '📃',
-    js: '💻',
-    html: '💻',
-    css: '💻',
-    py: '💻',
-    json: '🔧'
+    'GitHub': '🐙',
+    '掘金': '📝',
+    '知乎': '💡',
+    'CSDN': '📚',
+    'B站': '📺',
+    'YouTube': '🎬',
+    '慕课网': '🎓',
+    '淘宝': '🛍️',
+    '极客时间': '⏰',
+    '京东': '🏪'
   }
-  return icons[ext] || '📁'
+  return icons[source] || '📄'
 }
 
-const triggerFileInput = () => {
-  if (!uploading) {
-    fileInput.value.click()
+const getTypeLabel = (type) => {
+  const labels = {
+    'github': '仓库',
+    'article': '文章',
+    'video': '视频',
+    'product': '商品'
   }
+  return labels[type] || type
 }
 
-const handleFileSelect = async (e) => {
-  const file = e.target.files[0]
-  if (file) {
-    await uploadFile(file)
+const formatNumber = (num) => {
+  if (num >= 10000) {
+    return (num / 10000).toFixed(1) + '万'
   }
-  e.target.value = ''
+  return num?.toString() || '0'
 }
 
-const handleDrop = async (e) => {
-  isDragOver.value = false
-  const file = e.dataTransfer.files[0]
-  if (file) {
-    await uploadFile(file)
+const handleSearch = async () => {
+  if (!query.value.trim()) {
+    return
   }
-}
 
-const uploadFile = async (file) => {
-  uploading.value = true
-  const formData = new FormData()
-  formData.append('file', file)
+  loading.value = true
+  results.value = []
 
   try {
-    await axios.post('/api/upload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
+    const response = await axios.get('/api/search', {
+      params: {
+        q: query.value,
+        type: 'all'
       }
     })
-    await fetchFiles()
+    results.value = response.data.results
   } catch (error) {
-    console.error('上传失败:', error)
-    alert('文件上传失败，请重试')
-  } finally {
-    uploading.value = false
-  }
-}
-
-const fetchFiles = async () => {
-  loading.value = true
-  try {
-    const response = await axios.get('/api/files')
-    files.value = response.data.files
-  } catch (error) {
-    console.error('获取文件列表失败:', error)
+    console.error('搜索失败:', error)
+    alert('搜索失败，请稍后重试')
   } finally {
     loading.value = false
   }
 }
 
-const downloadFile = (file) => {
-  window.open(`/api/download/${file.filename}`, '_blank')
+const searchKeyword = (keyword) => {
+  query.value = keyword
+  handleSearch()
 }
 
-const deleteFile = async (file) => {
-  if (!confirm(`确定要删除文件 "${file.name}" 吗？`)) {
-    return
-  }
-
-  deleting.value = true
+const fetchHotKeywords = async () => {
   try {
-    await axios.delete(`/api/files/${file.filename}`)
-    await fetchFiles()
+    const response = await axios.get('/api/hot')
+    hotKeywords.value = response.data.hotKeywords
   } catch (error) {
-    console.error('删除失败:', error)
-    alert('删除失败，请重试')
-  } finally {
-    deleting.value = false
+    console.error('获取热门搜索失败:', error)
   }
 }
 
 onMounted(() => {
-  fetchFiles()
+  fetchHotKeywords()
 })
 </script>
